@@ -1,14 +1,15 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Archway Compare Â· NYU Archway</title>
+<title>Archway Compare &middot; NYU Archway</title>
 <meta name="description" content="Send one prompt to up to four models from different vendors at once, through a single NYU Archway key.">
+<meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="assets/archway.css">
 <script>
   // Pre-paint theme stamp: avoids a light flash for dark-mode users. Inline on
-  // purpose and safe here â€” GitHub Pages sets no CSP. (The Archway's own pages
+  // purpose and safe here — GitHub Pages sets no CSP. (The Archway's own pages
   // cannot do this; script-src 'self' blocks it.)
   try {
     var t = localStorage.getItem("nyu-archway:theme");
@@ -16,33 +17,108 @@
   } catch (e) {}
 </script>
 <style>
-  /* Layout rules this app adds on top of the design system. Everything else
-     comes from archway.css. */
+  /* Layout this app adds on top of the design system. Colours, controls, type
+     and motion all come from archway.css; nothing here re-styles a shared
+     component. Every length is a --sp-* / --r-* / --fs-* token.
+
+       1. Page rhythm
+       2. Step headings
+       3. Model picker
+       4. Composer
+       5. Verdict strip
+       6. Result columns
+       7. Responsive
+     ------------------------------------------------------------------- */
+
+  /* ------------------------------------------------- 1. Page rhythm */
+
+  /* Cards are the page's biggest objects, so they sit a step further apart
+     than .stack's default. */
+  #app {
+    gap: var(--sp-5);
+  }
+
+  /* Error slots and the verdict strip are empty until something happens, and a
+     gap where nothing is reads as a mistake. */
+  #models-error:empty,
+  #run-error:empty,
+  #summary:empty {
+    display: none;
+  }
+
+  #models-error:not(:empty) {
+    margin-bottom: var(--sp-4);
+  }
+
+  /* A series colour, set once per element and read by every part of it. */
+  .tone--1 { --series: var(--series-1); }
+  .tone--2 { --series: var(--series-2); }
+  .tone--3 { --series: var(--series-3); }
+  .tone--4 { --series: var(--series-4); }
+
+  /* A spinner inside a button has to sit on the button's own colour, not the
+     page's, or it vanishes on the primary action. */
+  .btn .spinner {
+    border-color: color-mix(in srgb, currentColor 32%, transparent);
+    border-top-color: currentColor;
+  }
+
+  /* ------------------------------------------------ 2. Step headings */
+
+  .step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--r-full);
+    border: 1px solid var(--accent-border);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* -------------------------------------------------- 3. Model picker */
+
+  #picker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
 
   .picker__group {
     border: 0;
     padding: 0;
-    margin: 0 0 var(--sp-4);
-    min-width: 0;
+    margin: 0;
+    min-inline-size: 0;
   }
 
-  .picker__group:last-child {
-    margin-bottom: 0;
+  /* A <legend> is laid out by the browser, not by us: `display` on it is
+     unreliable across engines, so the two labels stay inline. */
+  .picker__group > legend {
+    padding: 0 0 var(--sp-2);
   }
 
-  .picker__group legend {
-    padding: 0;
-    margin-bottom: var(--sp-2);
+  .picker__vendor {
     font-size: var(--fs-xs);
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-weight: 700;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  .picker__count {
+    margin-left: var(--sp-2);
+    font-size: var(--fs-xs);
     color: var(--ink-3);
   }
 
   .picker__list {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 13.5rem), 1fr));
     gap: var(--sp-2);
   }
 
@@ -51,93 +127,395 @@
     align-items: center;
     gap: var(--sp-2);
     min-width: 0;
-    padding: 0.35rem 0.55rem;
+    padding: 0.45rem 0.6rem;
     border: 1px solid var(--border);
     border-radius: var(--r-sm);
     background: var(--surface-1);
     font-size: var(--fs-sm);
+    line-height: 1.35;
     cursor: pointer;
+    transition: background 0.14s var(--ease), border-color 0.14s var(--ease),
+      box-shadow 0.14s var(--ease);
   }
 
-  .pick--on {
+  .pick:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+  }
+
+  /* The checkbox keeps its own ring for browsers without :has(); this just
+     carries it out to the whole chip where support exists. */
+  .pick:has(input:focus-visible) {
+    border-color: var(--accent);
+    box-shadow: var(--ring);
+  }
+
+  .pick--on,
+  .pick--on:hover {
     border-color: var(--accent-border);
     background: var(--accent-soft);
   }
 
+  .pick:has(input:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .pick input {
     flex: none;
-    accent-color: var(--accent);
+    margin: 0;
   }
 
-  .pick span {
+  .pick__name {
+    flex: 1;
     min-width: 0;
     overflow-wrap: anywhere;
+    font-weight: 560;
+    color: var(--ink-1);
   }
 
-  /* These three fill in only after a call, and .stack would otherwise leave a
-     gap where nothing is. */
-  #summary:empty,
-  #run-error:empty,
-  #models-error:empty {
+  /* The colour this model's column will carry, shown the moment it is picked -
+     so the bench below is already legible from up here. */
+  .pick__swatch {
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: var(--r-full);
+    background: var(--series, transparent);
+    opacity: 0;
+    transition: opacity 0.14s var(--ease);
+  }
+
+  .pick--on .pick__swatch {
+    opacity: 1;
+  }
+
+  /* ----------------------------------------------------- 4. Composer */
+
+  #hint.is-error {
+    color: var(--critical-ink);
+    font-weight: 580;
+  }
+
+  .presets__label {
+    color: var(--ink-3);
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    font-weight: 640;
+  }
+
+  /* An optional control, folded away but never hidden: the summary says so, and
+     a badge appears the moment it holds anything. */
+  .disclose {
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--border);
+  }
+
+  /* One disclosure treatment for both the system prompt and the per-column
+     header dump, so the page has a single "there is more here" affordance. */
+  .disclose > summary,
+  .col__more > summary {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    list-style: none;
+    cursor: pointer;
+    border-radius: var(--r-xs);
+    font-size: var(--fs-sm);
+    font-weight: 580;
+    color: var(--ink-2);
+    transition: color 0.14s var(--ease);
+  }
+
+  .disclose > summary::-webkit-details-marker,
+  .col__more > summary::-webkit-details-marker {
     display: none;
   }
 
-  /* The empty state is one grid item, so let it span the whole row. */
-  #results > .empty {
-    grid-column: 1 / -1;
+  .disclose > summary:hover,
+  .col__more > summary:hover {
+    color: var(--ink-1);
   }
 
-  /* One column per model. The 3px top edge is the column's series colour. */
+  .disclose > summary::before,
+  .col__more > summary::before {
+    content: "";
+    flex: none;
+    width: 0.45rem;
+    height: 0.45rem;
+    margin-left: 2px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform 0.18s var(--ease);
+  }
+
+  .disclose[open] > summary::before,
+  .col__more[open] > summary::before {
+    transform: rotate(45deg);
+  }
+
+  .disclose__body {
+    padding-top: var(--sp-3);
+  }
+
+  /* ------------------------------------------------ 5. Verdict strip */
+
+  .results__head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--sp-3);
+  }
+
+  .results__head h2 {
+    margin-right: auto;
+  }
+
+  .results__status {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  /* The answer to "so which one won" - a result in its own right, not a
+     caption under the grid. */
+  .verdict {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--sp-2) var(--sp-5);
+    margin-bottom: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--r-md);
+    background: var(--accent-soft);
+    animation: rise 0.22s var(--ease) both;
+  }
+
+  .verdict__item {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  .verdict__k {
+    flex: none;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .verdict__v {
+    font-weight: 620;
+    color: var(--ink-1);
+    overflow-wrap: anywhere;
+  }
+
+  .verdict__d {
+    font-family: var(--mono);
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  /* ---------------------------------------------- 6. Result columns */
+
+  /* Four across at full width, one at phone width, always equal: the grid
+     stretches every column to the tallest, which is what puts the footer stats
+     on one line across the bench. */
+  #results {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+    align-items: stretch;
+  }
+
+  .col--empty {
+    grid-column: 1 / -1;
+    border-style: dashed;
+    border-color: var(--border-strong);
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .empty__title {
+    display: block;
+    margin-bottom: var(--sp-1);
+    color: var(--ink-2);
+    font-size: var(--fs-base);
+    font-weight: 620;
+  }
+
   .col {
     display: flex;
     flex-direction: column;
     gap: var(--sp-3);
-    border-top: 3px solid var(--series-1);
+    min-width: 0;
+    border-top: 3px solid var(--series, var(--series-1));
   }
-
-  .col--1 { border-top-color: var(--series-1); }
-  .col--2 { border-top-color: var(--series-2); }
-  .col--3 { border-top-color: var(--series-3); }
-  .col--4 { border-top-color: var(--series-4); }
 
   .col__head {
     display: flex;
+    align-items: flex-start;
+    gap: var(--sp-2);
+    padding: var(--sp-4) var(--sp-4) 0;
+  }
+
+  .col__dot {
+    flex: none;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin-top: 0.42rem;
+    border-radius: var(--r-full);
+    background: var(--series, var(--series-1));
+  }
+
+  .col__id {
+    display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
     min-width: 0;
+    margin-right: auto;
   }
 
   .col__name {
     font-size: var(--fs-base);
     font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
     overflow-wrap: anywhere;
+    color: var(--ink-1);
   }
 
-  .col__body {
-    flex: 1;
-    min-height: 3rem;
-  }
-
-  .col__foot {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--sp-2) var(--sp-3);
-    margin-top: auto;
-    padding-top: var(--sp-3);
-    border-top: 1px solid var(--border);
+  .col__provider {
     font-size: var(--fs-xs);
+    font-weight: 640;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
     color: var(--ink-3);
   }
 
-  .col__more summary {
-    cursor: pointer;
+  .col__state {
+    display: flex;
+    align-items: center;
+    flex: none;
+    min-height: 1.1rem;
+    margin-top: 1px;
+  }
+
+  /* Model output is untrusted text written with textContent, so white-space is
+     what preserves its paragraphs. Capped and scrolled rather than unbounded:
+     four columns of different lengths must still start and end together. */
+  .col__body {
+    flex: 1;
+    min-height: 4rem;
+    max-height: 28rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: 0;
+    padding: 0 var(--sp-4);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: var(--fs-sm);
+    line-height: 1.62;
+    color: var(--ink-1);
+  }
+
+  .col__body--wait {
+    color: var(--ink-3);
+  }
+
+  .col__err {
+    padding: 0 var(--sp-4);
+  }
+
+  .col__err:empty {
+    display: none;
+  }
+
+  /* Same two cells, same order, same width in every column - that is what makes
+     the numbers comparable by eye rather than by reading. */
+  .col__foot {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-2) var(--sp-3);
+    align-items: end;
+    margin-top: auto;
+    padding: var(--sp-3) var(--sp-4);
+    border-top: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+
+  .col__stat {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .col__k {
+    font-size: 0.625rem;
+    font-weight: 640;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    line-height: 1.4;
+    color: var(--ink-3);
+  }
+
+  .col__v {
+    font-family: var(--mono);
+    font-size: var(--fs-sm);
+    font-weight: 540;
+    letter-spacing: -0.01em;
+    color: var(--ink-1);
+  }
+
+  .col__flags {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  .col__flags:empty {
+    display: none;
+  }
+
+  .col__more {
+    grid-column: 1 / -1;
+  }
+
+  .col__more > summary {
     font-size: var(--fs-xs);
     color: var(--ink-3);
   }
 
   .col__more .readout {
     margin-top: var(--sp-2);
+    background: var(--surface-1);
+  }
+
+  /* ------------------------------------------------- 7. Responsive */
+
+  @media (max-width: 40rem) {
+    .col__body {
+      max-height: 22rem;
+    }
+
+    .col__head,
+    .col__body,
+    .col__err {
+      padding-left: var(--sp-3);
+      padding-right: var(--sp-3);
+    }
+
+    .col__foot {
+      padding: var(--sp-3);
+    }
   }
 </style>
 </head>
@@ -153,60 +531,107 @@
     <a class="btn btn--sm" href="https://github.com/AndrewBuildsNYU/archway-compare">Source</a>
   </header>
 
-  <p class="lede">One prompt, up to four models from different vendors, answering side by side.
-  Every column goes through the same NYU Archway key â€” no vendor SDKs, no second account.</p>
+  <p class="lede">One prompt, up to four models from four different vendors, answering
+  side by side &mdash; with what each one spent and how long it took. Every column is the
+  same NYU Archway key: no vendor SDKs, no second account.</p>
 
   <div id="key-mount"></div>
 
   <main id="app" class="stack">
-    <form class="card stack" id="run-form">
+    <section class="card" aria-labelledby="models-heading">
       <div class="card__head">
-        <h2>Prompt</h2>
-        <span class="card__note" id="hint" role="status">Connect a key to load the model catalogue.</span>
+        <span class="step" aria-hidden="true">1</span>
+        <h2 id="models-heading">Choose models</h2>
+        <span class="spinner hidden" id="pick-busy" aria-hidden="true"></span>
+        <span class="badge" id="pick-count">0 of 4</span>
+      </div>
+      <p class="card__note" id="pick-note" role="status">Connect a key above and the catalogue loads here &mdash; already scoped to what that key may call.</p>
+      <div id="models-error"></div>
+      <div id="picker">
+        <p class="empty">
+          <strong class="empty__title">No catalogue yet</strong>
+          Paste your key above to see every model this key can reach.
+        </p>
+      </div>
+      <div class="card__foot">
+        <button type="button" class="btn btn--sm" id="pick-auto" disabled>One per vendor</button>
+        <button type="button" class="btn btn--sm btn--ghost" id="pick-clear" disabled>Clear selection</button>
+        <span class="spacer"></span>
+        <span class="xs muted">Four columns maximum</span>
+      </div>
+    </section>
+
+    <form class="card" id="run-form">
+      <div class="card__head">
+        <span class="step" aria-hidden="true">2</span>
+        <h2>Write the prompt</h2>
+        <span class="small muted" id="hint" role="status"></span>
+      </div>
+      <p class="card__note">Every selected model gets exactly this prompt, so the model is
+      the only thing that changes. Answers are capped at 400 tokens to keep the columns
+      comparable and the quota cost small.</p>
+
+      <div class="stack">
+        <div class="field">
+          <label for="prompt">Prompt</label>
+          <textarea id="prompt" rows="5" placeholder="Explain what an API gateway does to someone who has never written code." disabled></textarea>
+        </div>
+
+        <div class="row row--tight" id="presets" role="group" aria-label="Prompt starters">
+          <span class="xs presets__label" aria-hidden="true">Starters</span>
+          <button type="button" class="btn btn--sm btn--ghost" data-prompt="Explain what an API gateway does to someone who has never written code. Three sentences, no jargon." disabled>Explain plainly</button>
+          <button type="button" class="btn btn--sm btn--ghost" data-prompt="Write a six-line poem about waiting for a slow API response." disabled>Write something</button>
+          <button type="button" class="btn btn--sm btn--ghost" data-prompt="Name three trade-offs of putting a token quota in front of an LLM API, and say which one you would accept first and why." disabled>Weigh a trade-off</button>
+        </div>
+
+        <details class="disclose" id="sys-wrap">
+          <summary>
+            <span>Shared system prompt</span>
+            <span class="badge badge--accent hidden" id="sys-flag">in use</span>
+            <span class="xs muted">optional</span>
+          </summary>
+          <div class="disclose__body">
+            <div class="field">
+              <label for="system" class="sr-only">Shared system prompt</label>
+              <textarea id="system" rows="2" placeholder="Answer in three sentences, plainly." disabled></textarea>
+              <p class="field__hint">Prepended to every column, so a house style is compared rather than four different briefs.</p>
+            </div>
+          </div>
+        </details>
       </div>
 
-      <div class="field">
-        <label for="system">Shared system prompt (optional)</label>
-        <textarea id="system" rows="2" placeholder="Answer in three sentences, plainly." disabled></textarea>
-        <p class="field__hint">Sent to every model, so the model is the only thing that changes.</p>
-      </div>
-
-      <div class="field">
-        <label for="prompt">Prompt</label>
-        <textarea id="prompt" rows="4" placeholder="Explain what an API gateway does to someone who has never written code." disabled></textarea>
-      </div>
-
-      <div class="row">
-        <button type="submit" class="btn btn--primary" id="run" disabled>Run comparison</button>
-        <button type="button" class="btn btn--danger" id="stop" disabled>Stop all</button>
+      <div class="card__foot">
+        <button type="submit" class="btn btn--primary" id="run" disabled>
+          <span class="spinner hidden" id="run-spin" aria-hidden="true"></span>
+          <span id="run-label">Run comparison</span>
+        </button>
+        <button type="button" class="btn btn--danger" id="stop" disabled>Stop</button>
         <span class="spacer"></span>
         <span class="xs muted">Ctrl / &#8984; + Enter runs &middot; Esc stops</span>
       </div>
     </form>
 
-    <section class="card stack" aria-labelledby="models-heading">
-      <div class="card__head">
-        <h2 id="models-heading">Models</h2>
-        <span class="badge" id="pick-count">0 selected</span>
-      </div>
-      <p class="card__note" id="pick-note" role="status">One key reaches every vendor NYU fronts. Pick up to four.</p>
-      <div id="models-error"></div>
-      <div id="picker">
-        <p class="empty">The catalogue loads once your key is connected.</p>
-      </div>
-    </section>
-
     <div id="run-error"></div>
-    <p class="small" id="summary" role="status"></p>
 
-    <section id="results" class="grid" aria-label="Comparison results" aria-live="polite" aria-relevant="additions" tabindex="-1">
-      <p class="empty">Pick your models, write a prompt, and run the comparison. Answers stream in side by side.</p>
+    <section aria-labelledby="results-heading">
+      <div class="results__head">
+        <h2 id="results-heading">Results</h2>
+        <span class="results__status" id="results-status" role="status"></span>
+      </div>
+      <div id="summary" class="verdict"></div>
+      <div id="results" class="grid" aria-label="Comparison results" aria-live="polite" aria-relevant="additions" tabindex="-1">
+        <article class="card col--empty">
+          <p class="empty">
+            <strong class="empty__title">Nothing to compare yet</strong>
+            Pick your models, write a prompt, then run. Every answer streams into its own column at the same time.
+          </p>
+        </article>
+      </div>
     </section>
   </main>
 
   <footer class="footer">
-    <span>Runs entirely in your browser. Your key is sent only to the Archway you point it at.</span>
-    <span>Ask whoever issued your key for the gateway address and its documentation.</span>
+    <span>Runs entirely in your browser. Your key is held for this tab only, and is sent only to the Archway.</span>
     <a href="https://github.com/AndrewBuildsNYU?tab=repositories&amp;q=archway-">More examples</a>
   </footer>
 </div>

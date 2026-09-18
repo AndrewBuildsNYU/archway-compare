@@ -1,7 +1,15 @@
 /* Archway Compare: fan one prompt out to several models at once and stream each
  * answer into its own column. Owns the picker, the run/stop lifecycle and the
  * per-column rendering; everything about keys, HTTP and errors lives in
- * assets/archway.js. */
+ * assets/archway.js.
+ *
+ * Two rules this file keeps:
+ *   - Nothing is ever written with innerHTML. Model output is untrusted, so
+ *     every node is built with Archway.el() and filled with textContent.
+ *   - Punctuation that repeats (the em dash, the ellipsis) is a named constant,
+ *     so the strings below stay readable and one spelling is used throughout.
+ *     The file is UTF-8 with no BOM, as every file here is.
+ */
 (function () {
   "use strict";
 
@@ -9,38 +17,64 @@
   // concurrent streams still read as one screen on a laptop.
   var MAX_MODELS = 4;
 
-  // Short answers keep the columns comparable and the quota cost small.
+  // Short answers keep the columns comparable and the quota cost small. The
+  // number is quoted in index.html's card note - change both together.
   var MAX_TOKENS = 400;
 
-  var PICK_HINT = "One key reaches every vendor NYU fronts. Pick up to four.";
-  var EMPTY_RESULTS =
-    "Pick your models, write a prompt, and run the comparison. Answers stream in side by side.";
+  var DASH = "—";
+  var ELLIPSIS = "…";
 
-  var form = document.getElementById("run-form");
-  var systemInput = document.getElementById("system");
-  var promptInput = document.getElementById("prompt");
-  var runBtn = document.getElementById("run");
-  var stopBtn = document.getElementById("stop");
-  var hint = document.getElementById("hint");
-  var picker = document.getElementById("picker");
-  var pickNote = document.getElementById("pick-note");
-  var pickCount = document.getElementById("pick-count");
-  var modelsError = document.getElementById("models-error");
-  var runError = document.getElementById("run-error");
-  var summary = document.getElementById("summary");
-  var results = document.getElementById("results");
+  var PICK_HINT =
+    "One key reaches every vendor the Archway fronts. Pick up to four " +
+    DASH +
+    " they all run at once.";
+  var PICK_WAIT =
+    "Connect a key above and the catalogue loads here " +
+    DASH +
+    " already scoped to what that key may call.";
+  var EMPTY_TITLE = "Nothing to compare yet";
+  var EMPTY_BODY =
+    "Pick your models, write a prompt, then run. Every answer streams into its own " +
+    "column at the same time.";
+
+  function byId(id) {
+    return document.getElementById(id);
+  }
+
+  var form = byId("run-form");
+  var systemInput = byId("system");
+  var promptInput = byId("prompt");
+  var runBtn = byId("run");
+  var runLabel = byId("run-label");
+  var runSpin = byId("run-spin");
+  var stopBtn = byId("stop");
+  var hint = byId("hint");
+  var picker = byId("picker");
+  var pickNote = byId("pick-note");
+  var pickCount = byId("pick-count");
+  var pickBusy = byId("pick-busy");
+  var pickAuto = byId("pick-auto");
+  var pickClear = byId("pick-clear");
+  var modelsError = byId("models-error");
+  var runError = byId("run-error");
+  var summary = byId("summary");
+  var results = byId("results");
+  var resultsStatus = byId("results-status");
+  var sysFlag = byId("sys-flag");
+  var presets = Array.prototype.slice.call(
+    document.querySelectorAll("#presets button[data-prompt]")
+  );
 
   var state = {
     models: [],
     byId: {},
     running: false,
     controllers: [],
-    readyHint: "Connect a key to load the model catalogue.",
   };
 
-  Archway.mountThemeToggle(document.getElementById("theme-toggle"));
+  Archway.mountThemeToggle(byId("theme-toggle"));
 
-  Archway.mountKeyPanel(document.getElementById("key-mount"), {
+  Archway.mountKeyPanel(byId("key-mount"), {
     onReady: loadModels,
     onClear: reset,
   });
@@ -57,7 +91,8 @@
 
   function loadModels() {
     Archway.clear(modelsError);
-    hint.textContent = "Loading the catalogue…";
+    pickBusy.classList.remove("hidden");
+    pickNote.textContent = "Loading the catalogue" + ELLIPSIS;
 
     Archway.listModels()
       .then(function (models) {
@@ -72,33 +107,25 @@
         // The catalogue is already scoped to this key, so one model per provider
         // is the most interesting default: it is the comparison this gateway
         // exists to make possible.
-        var defaults = {};
-        Archway.onePerProvider(models, MAX_MODELS).forEach(function (m) {
-          defaults[m.id] = true;
-        });
-        pickInputs().forEach(function (box) {
-          box.checked = defaults[box.value] === true;
-        });
-
-        state.readyHint = models.length + " models available on this key.";
-        hint.textContent = state.readyHint;
-        syncPicker();
+        applyOnePerVendor();
+        pickNote.textContent = PICK_HINT;
       })
       .catch(function (err) {
         // Drop the previous catalogue rather than leaving it on screen. On a
-        // *re*-load - the user swapped in a revoked key or mistyped the base
-        // URL - the old key's models would otherwise stay checked and every
-        // control would stay enabled, because `ready` is computed from
-        // state.models.length. Running then fires four streams that all fail
-        // under a picker that looks perfectly live.
+        // *re*-load - the user swapped in a revoked key - the old key's models
+        // would otherwise stay checked and every control would stay enabled,
+        // because `ready` is computed from state.models.length. Running then
+        // fires four streams that all fail under a picker that looks live.
         state.models = [];
         state.byId = {};
         renderPicker([]);
 
-        state.readyHint = "The catalogue did not load.";
-        hint.textContent = state.readyHint;
+        pickNote.textContent = "The catalogue did not load.";
         Archway.renderError(modelsError, err);
-        refreshControls();
+        syncPicker();
+      })
+      .finally(function () {
+        pickBusy.classList.add("hidden");
       });
   }
 
@@ -106,11 +133,13 @@
     Archway.clear(picker);
 
     if (!models.length) {
-      picker.appendChild(Archway.el("p", "empty", "This key has no chat models enabled."));
+      picker.appendChild(
+        emptyBlock("No models on this key", "Ask the Archway team to enable a chat model for it.")
+      );
       return;
     }
 
-    // Catalogue order, grouped by provider — and the same order columns run in,
+    // Catalogue order, grouped by provider - and the same order columns run in,
     // so a provider keeps its colour from one run to the next.
     var groups = {};
     var order = [];
@@ -125,7 +154,17 @@
 
     order.forEach(function (name) {
       var group = Archway.el("fieldset", "picker__group");
-      group.appendChild(Archway.el("legend", null, name));
+
+      var legend = Archway.el("legend");
+      legend.appendChild(Archway.el("span", "picker__vendor", name));
+      legend.appendChild(
+        Archway.el(
+          "span",
+          "picker__count",
+          groups[name].length + (groups[name].length === 1 ? " model" : " models")
+        )
+      );
+      group.appendChild(legend);
 
       var list = Archway.el("div", "picker__list");
       groups[name].forEach(function (m) {
@@ -139,15 +178,24 @@
 
   function pickRow(model) {
     var label = Archway.el("label", "pick");
+    // The alias is what you would actually send; it is too long for the chip
+    // but worth having on hover.
+    label.title = model.id;
+
     var box = Archway.el("input");
     box.type = "checkbox";
     box.value = model.id;
 
     label.appendChild(box);
-    label.appendChild(Archway.el("span", null, nameOf(model)));
+    label.appendChild(Archway.el("span", "pick__name", nameOf(model)));
     if (model.deprecated) {
       label.appendChild(Archway.el("span", "badge badge--warn", "deprecated"));
     }
+
+    var swatch = Archway.el("span", "pick__swatch");
+    swatch.setAttribute("aria-hidden", "true");
+    label.appendChild(swatch);
+
     return label;
   }
 
@@ -163,13 +211,36 @@
     return out;
   }
 
+  function applyOnePerVendor() {
+    var defaults = {};
+    Archway.onePerProvider(state.models, MAX_MODELS).forEach(function (m) {
+      defaults[m.id] = true;
+    });
+    pickInputs().forEach(function (box) {
+      box.checked = defaults[box.value] === true;
+    });
+    syncPicker();
+  }
+
+  /* Paint the picker from the checkboxes: the selection count, and the series
+   * colour each picked model will carry once it has a column. Selection order
+   * here is DOM order, which is the order selectedModels() returns and the
+   * order run() builds columns in - so the swatch is a promise the bench
+   * keeps. */
   function syncPicker() {
     var count = 0;
     pickInputs().forEach(function (box) {
-      if (box.checked) count += 1;
-      box.parentNode.classList.toggle("pick--on", box.checked);
+      var chip = box.parentNode;
+      chip.classList.remove("tone--1", "tone--2", "tone--3", "tone--4");
+      chip.classList.toggle("pick--on", box.checked);
+      if (box.checked) {
+        count += 1;
+        if (count <= MAX_MODELS) chip.classList.add("tone--" + count);
+      }
     });
-    pickCount.textContent = count + " selected";
+
+    pickCount.textContent = count + " of " + MAX_MODELS;
+    pickCount.classList.toggle("badge--accent", count > 0);
     refreshControls();
   }
 
@@ -186,16 +257,39 @@
     syncPicker();
   });
 
+  pickAuto.addEventListener("click", function () {
+    applyOnePerVendor();
+    pickNote.textContent = PICK_HINT;
+  });
+
+  pickClear.addEventListener("click", function () {
+    pickInputs().forEach(function (box) {
+      box.checked = false;
+    });
+    pickNote.textContent = PICK_HINT;
+    syncPicker();
+  });
+
   // ----------------------------------------------------------------- controls
 
   function refreshControls() {
     var ready = Archway.hasKey() && state.models.length > 0;
+    var idle = ready && !state.running;
+    var picked = selectedModels().length;
+
     systemInput.disabled = !ready;
     promptInput.disabled = !ready;
+    presets.forEach(function (button) {
+      button.disabled = !idle;
+    });
+
     // Left enabled with nothing picked on purpose: run() then says what is
     // missing, which beats a dead button with no explanation.
     runBtn.disabled = !ready || state.running;
     stopBtn.disabled = !state.running;
+
+    pickAuto.disabled = !idle;
+    pickClear.disabled = !idle || picked === 0;
     pickInputs().forEach(function (box) {
       box.disabled = !ready || state.running;
     });
@@ -208,19 +302,36 @@
     Archway.clear(modelsError);
     Archway.clear(runError);
     Archway.clear(picker);
-    picker.appendChild(Archway.el("p", "empty", "The catalogue loads once your key is connected."));
-    summary.textContent = "";
-    pickNote.textContent = PICK_HINT;
-    pickCount.textContent = "0 selected";
-    state.readyHint = "Connect a key to load the model catalogue.";
-    hint.textContent = state.readyHint;
+    picker.appendChild(
+      emptyBlock("No catalogue yet", "Paste your key above to see every model this key can reach.")
+    );
+    Archway.clear(summary);
+    Archway.clear(resultsStatus);
+    pickNote.textContent = PICK_WAIT;
+    pickCount.textContent = "0 of " + MAX_MODELS;
+    pickCount.classList.remove("badge--accent");
+    setHint("");
     showEmptyResults();
     refreshControls();
   }
 
+  function setHint(text, isError) {
+    hint.textContent = text || "";
+    hint.classList.toggle("is-error", isError === true);
+  }
+
+  function emptyBlock(title, body) {
+    var wrap = Archway.el("p", "empty");
+    wrap.appendChild(Archway.el("strong", "empty__title", title));
+    wrap.appendChild(document.createTextNode(body));
+    return wrap;
+  }
+
   function showEmptyResults() {
     Archway.clear(results);
-    results.appendChild(Archway.el("p", "empty", EMPTY_RESULTS));
+    var card = Archway.el("article", "card col--empty");
+    card.appendChild(emptyBlock(EMPTY_TITLE, EMPTY_BODY));
+    results.appendChild(card);
   }
 
   function stopAll() {
@@ -230,37 +341,85 @@
     state.controllers = [];
   }
 
+  function setRunning(on) {
+    state.running = on;
+    runSpin.classList.toggle("hidden", !on);
+    runLabel.textContent = on ? "Running" + ELLIPSIS : "Run comparison";
+    results.setAttribute("aria-busy", on ? "true" : "false");
+    refreshControls();
+  }
+
   // -------------------------------------------------------------- comparison
 
+  function seconds(ms) {
+    return (ms / 1000).toFixed(1) + " s";
+  }
+
+  function statCell(label) {
+    var root = Archway.el("div", "col__stat");
+    root.appendChild(Archway.el("span", "col__k", label));
+    var value = Archway.el("span", "col__v", DASH);
+    root.appendChild(value);
+    return { root: root, value: value };
+  }
+
   function makeColumn(model, index) {
-    var root = Archway.el("article", "card col col--" + (index + 1));
+    var root = Archway.el("article", "card card--flush col tone--" + (index + 1));
 
-    var head = Archway.el("div", "col__head");
-    head.appendChild(Archway.el("span", "col__name", nameOf(model)));
-    head.appendChild(Archway.el("span", "xs muted", providerOf(model)));
+    var head = Archway.el("header", "col__head");
+    var dot = Archway.el("span", "col__dot");
+    dot.setAttribute("aria-hidden", "true");
+    var ident = Archway.el("div", "col__id");
+    ident.appendChild(Archway.el("span", "col__name", nameOf(model)));
+    ident.appendChild(Archway.el("span", "col__provider", providerOf(model)));
+    var status = Archway.el("span", "col__state");
+    status.setAttribute("aria-hidden", "true");
+    status.appendChild(Archway.el("span", "spinner"));
+    head.appendChild(dot);
+    head.appendChild(ident);
+    head.appendChild(status);
 
-    // Model output is untrusted text: textContent only, and .msg__body keeps the
+    // Model output is untrusted text: textContent only, and .col__body keeps the
     // whitespace it arrived with.
-    var body = Archway.el("p", "msg__body col__body streaming");
+    var body = Archway.el("p", "col__body col__body--wait streaming");
+    body.textContent = "Waiting for the first token" + ELLIPSIS;
     // The region announces new columns; announcing every streamed fragment
     // would make a screen reader unusable.
     body.setAttribute("aria-live", "off");
 
-    var errBox = Archway.el("div");
-    var foot = Archway.el("div", "col__foot");
+    var errBox = Archway.el("div", "col__err");
+
+    var foot = Archway.el("footer", "col__foot");
+    var tokens = statCell("Tokens");
+    var elapsed = statCell("Elapsed");
+    var flags = Archway.el("div", "col__flags");
 
     var more = Archway.el("details", "col__more hidden");
     more.appendChild(Archway.el("summary", null, "Gateway headers"));
     var readout = Archway.el("div", "readout hidden");
     more.appendChild(readout);
 
+    foot.appendChild(tokens.root);
+    foot.appendChild(elapsed.root);
+    foot.appendChild(flags);
+    foot.appendChild(more);
+
     root.appendChild(head);
     root.appendChild(body);
     root.appendChild(errBox);
     root.appendChild(foot);
-    root.appendChild(more);
 
-    return { root: root, body: body, errBox: errBox, foot: foot, more: more, readout: readout };
+    return {
+      root: root,
+      body: body,
+      errBox: errBox,
+      status: status,
+      tokens: tokens.value,
+      elapsed: elapsed.value,
+      flags: flags,
+      more: more,
+      readout: readout,
+    };
   }
 
   function totalTokens(result) {
@@ -271,24 +430,30 @@
     return isFinite(used) ? used : null;
   }
 
-  function renderFoot(col, result) {
-    Archway.clear(col.foot);
+  function flag(col, className, text, title) {
+    var badge = Archway.el("span", className ? "badge " + className : "badge", text);
+    if (title) badge.title = title;
+    col.flags.appendChild(badge);
+  }
 
+  function renderFoot(col, result) {
     var tokens = totalTokens(result);
-    col.foot.appendChild(
-      Archway.el("span", null, tokens === null ? "tokens n/a" : Archway.formatInt(tokens) + " tokens")
-    );
-    col.foot.appendChild(Archway.el("span", null, (result.ms / 1000).toFixed(1) + " s"));
+    col.tokens.textContent = tokens === null ? "n/a" : Archway.formatInt(tokens);
+    col.elapsed.textContent = seconds(result.ms);
 
     if (result.headers && result.headers["x-nyu-mock"] === "true") {
-      var badge = Archway.el("span", "badge badge--warn", "mock");
-      badge.title = "No active vendor credential for this provider — the Archway answered from its "
-        + "mock adapter. The token accounting is still real.";
-      col.foot.appendChild(badge);
+      flag(
+        col,
+        "badge--warn",
+        "mock",
+        "No active vendor credential for this provider " +
+          DASH +
+          " the Archway answered from its mock adapter. The token accounting is still real."
+      );
     }
   }
 
-  function runOne(model, col, prompt, system) {
+  function runOne(model, col, prompt, system, onSettled) {
     var controller = new AbortController();
     state.controllers.push(controller);
 
@@ -300,84 +465,143 @@
     };
     if (system) opts.system = system;
 
+    var first = true;
+
     return Archway.streamChat(opts, function (fragment, full) {
+      if (first) {
+        first = false;
+        col.body.classList.remove("col__body--wait");
+      }
       col.body.textContent = full;
     })
       .then(function (result) {
+        // A placeholder stays in the muted voice; a real answer does not.
+        col.body.classList.toggle("col__body--wait", !result.text);
         col.body.textContent = result.text || "(the model returned nothing)";
         renderFoot(col, result);
         Archway.renderReadout(col.readout, result.headers, { ms: result.ms });
         col.more.classList.remove("hidden");
-        return { model: model, ok: true, ms: result.ms, tokens: totalTokens(result) };
+        return { model: model, col: col, ok: true, ms: result.ms, tokens: totalTokens(result) };
       })
       .catch(function (err) {
         // One vendor being down is not the comparison failing: the error stays
-        // inside its own column and the other streams run on.
+        // inside its own column and the other streams run on. `first` still
+        // being true means nothing ever arrived to overwrite the placeholder,
+        // so this is the only chance to replace it.
         if (err && err.name === "AbortError") {
-          col.foot.textContent = "Stopped.";
-          return { model: model, ok: false };
+          if (first) col.body.textContent = "(stopped before any output)";
+          flag(col, "", "stopped");
+          return { model: model, col: col, ok: false };
         }
+
+        if (first) col.body.textContent = "";
         Archway.renderError(col.errBox, err);
-        return { model: model, ok: false };
+        flag(col, "badge--bad", "failed");
+        return { model: model, col: col, ok: false };
       })
       .then(function (row) {
         col.body.classList.remove("streaming");
+        Archway.clear(col.status);
+        if (onSettled) onSettled(row);
         return row;
       });
   }
 
+  // ----------------------------------------------------------------- verdict
+
+  function statusLine(done, total, running) {
+    Archway.clear(resultsStatus);
+    if (!total) return;
+
+    if (running) {
+      var spin = Archway.el("span", "spinner");
+      spin.setAttribute("aria-hidden", "true");
+      resultsStatus.appendChild(spin);
+    }
+    resultsStatus.appendChild(Archway.el("span", null, done + " of " + total + " answered"));
+  }
+
+  function verdictItem(label, value, detail) {
+    var item = Archway.el("div", "verdict__item");
+    item.appendChild(Archway.el("span", "verdict__k", label));
+    item.appendChild(Archway.el("span", "verdict__v", value));
+    if (detail) item.appendChild(Archway.el("span", "verdict__d", detail));
+    return item;
+  }
+
+  /* The point of the whole page, stated once: of the models that answered, which
+   * was quickest and which cost least. Below two answers there is nothing to
+   * compare, so the strip stays away rather than dressing up a single result. */
   function renderSummary(rows) {
+    Archway.clear(summary);
+
     var done = rows.filter(function (row) {
       return row.ok;
     });
-    if (!done.length) {
-      summary.textContent = "";
-      return;
+    statusLine(done.length, rows.length, false);
+
+    var failed = rows.length - done.length;
+    if (failed > 0) {
+      resultsStatus.appendChild(Archway.el("span", "badge badge--bad", failed + " failed"));
     }
+
+    if (done.length < 2) return;
 
     var fastest = done.slice().sort(function (a, b) {
       return a.ms - b.ms;
     })[0];
+
     var priced = done.filter(function (row) {
       return typeof row.tokens === "number";
     });
-    var cheapest = priced.sort(function (a, b) {
-      return a.tokens - b.tokens;
-    })[0];
+    var cheapest = priced.length > 1
+      ? priced.slice().sort(function (a, b) {
+          return a.tokens - b.tokens;
+        })[0]
+      : null;
 
-    var parts = ["Fastest: " + nameOf(fastest.model) + " (" + (fastest.ms / 1000).toFixed(1) + " s)"];
+    summary.appendChild(verdictItem("Fastest", nameOf(fastest.model), seconds(fastest.ms)));
+    flag(fastest.col, "badge--good", "fastest");
+
     if (cheapest) {
-      parts.push("Fewest tokens: " + nameOf(cheapest.model) + " (" + Archway.formatInt(cheapest.tokens) + ")");
+      summary.appendChild(
+        verdictItem("Fewest tokens", nameOf(cheapest.model), Archway.formatInt(cheapest.tokens))
+      );
+      flag(cheapest.col, "badge--good", "fewest tokens");
     }
-    summary.textContent = parts.join("  ·  ");
+
+    summary.appendChild(verdictItem("Answered", done.length + " of " + rows.length, ""));
   }
+
+  // --------------------------------------------------------------------- run
 
   function run() {
     if (state.running) return;
 
     Archway.clear(runError);
-    var prompt = promptInput.value.trim();
-    if (!prompt) {
-      hint.textContent = "Type a prompt first.";
-      promptInput.focus();
-      return;
-    }
-    hint.textContent = state.readyHint;
 
     var models = selectedModels();
     if (!models.length) {
-      pickNote.textContent = "Pick at least one model.";
+      pickNote.textContent = "Pick at least one model to compare.";
+      pickAuto.focus();
       return;
     }
 
+    var prompt = promptInput.value.trim();
+    if (!prompt) {
+      setHint("Type a prompt first.", true);
+      promptInput.focus();
+      return;
+    }
+    setHint("");
+    pickNote.textContent = PICK_HINT;
+
     var system = systemInput.value.trim();
 
-    state.running = true;
     state.controllers = [];
-    refreshControls();
-    summary.textContent = "";
+    setRunning(true);
+    Archway.clear(summary);
     Archway.clear(results);
-    results.setAttribute("aria-busy", "true");
 
     var cols = models.map(function (model, index) {
       var col = makeColumn(model, index);
@@ -386,25 +610,32 @@
     });
     results.focus();
 
+    var answered = 0;
+    statusLine(0, models.length, true);
+
     // The whole point: every column is in flight at once, on one key.
     Promise.all(
       models.map(function (model, index) {
-        return runOne(model, cols[index], prompt, system);
+        return runOne(model, cols[index], prompt, system, function (row) {
+          if (row.ok) answered += 1;
+          statusLine(answered, models.length, true);
+        });
       })
     )
       .then(renderSummary)
       // runOne swallows its own failures, so this only catches a bug in the
-      // fan-out itself — but an unhandled rejection would leave the UI stuck.
+      // fan-out itself - but an unhandled rejection would leave the UI stuck.
       .catch(function (err) {
+        statusLine(answered, models.length, false);
         Archway.renderError(runError, err);
       })
       .finally(function () {
-        state.running = false;
         state.controllers = [];
-        results.setAttribute("aria-busy", "false");
-        refreshControls();
+        setRunning(false);
       });
   }
+
+  // ------------------------------------------------------------------- wiring
 
   form.addEventListener("submit", function (event) {
     event.preventDefault();
@@ -412,6 +643,22 @@
   });
 
   stopBtn.addEventListener("click", stopAll);
+
+  promptInput.addEventListener("input", function () {
+    if (hint.classList.contains("is-error")) setHint("");
+  });
+
+  systemInput.addEventListener("input", function () {
+    sysFlag.classList.toggle("hidden", systemInput.value.trim().length === 0);
+  });
+
+  presets.forEach(function (button) {
+    button.addEventListener("click", function () {
+      promptInput.value = button.getAttribute("data-prompt") || "";
+      setHint("");
+      promptInput.focus();
+    });
+  });
 
   document.addEventListener("keydown", function (event) {
     // Modifier-only shortcuts, so typing in the prompt box is never hijacked.

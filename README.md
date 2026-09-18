@@ -28,7 +28,8 @@ cd archway-compare
 Open `index.html`. That is the whole build: no bundler, no npm, no dependencies, no
 server. Every call goes to the Archway from your browser.
 
-Pointing it at a different Archway (the base URL field in the key panel) needs that
+Pointing it at a different Archway (the `BASE_URL` constant in `assets/archway.js`,
+deliberately not a field in the UI) needs that
 page's origin â€” including `null` for a `file://` page â€” in `NYU_CORS_ALLOWED_ORIGINS`
 on that gateway. A missing origin fails as an opaque network error, because a blocked
 CORS preflight and an unreachable host look identical to JavaScript.
