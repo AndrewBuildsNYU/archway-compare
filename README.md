@@ -1,7 +1,7 @@
-﻿# Archway Compare
+# Archway Compare
 
 One prompt, up to four models from different vendors, streaming side by side in the
-browser. It demonstrates the thing the NYU Archway exists for: a single `sk-nyu-â€¦` key
+browser. It demonstrates the thing the NYU Archway exists for: a single `sk-nyu-…` key
 that reaches every vendor NYU fronts, so comparing OpenAI against Anthropic against
 anything else is one fetch loop and no second account.
 
@@ -30,7 +30,7 @@ server. Every call goes to the Archway from your browser.
 
 Pointing it at a different Archway (the `BASE_URL` constant in `assets/archway.js`,
 deliberately not a field in the UI) needs that
-page's origin â€” including `null` for a `file://` page â€” in `NYU_CORS_ALLOWED_ORIGINS`
+page's origin — including `null` for a `file://` page — in `NYU_CORS_ALLOWED_ORIGINS`
 on that gateway. A missing origin fails as an opaque network error, because a blocked
 CORS preflight and an unreachable host look identical to JavaScript.
 
@@ -40,7 +40,7 @@ The interesting part is the fan-out in `assets/app.js`:
 
 1. `Archway.listModels()` returns only the chat models **this key** may call, so the
    picker is already scoped to your permissions. `Archway.onePerProvider(models, 4)`
-   picks the default set â€” one model per vendor, which is the comparison worth seeing.
+   picks the default set — one model per vendor, which is the comparison worth seeing.
 2. `Promise.all` starts every selected model at once, each `Archway.streamChat()` call
    writing fragments into its own column with `textContent`. Model output is untrusted
    input; nothing here touches `innerHTML`.
@@ -49,7 +49,7 @@ The interesting part is the fan-out in `assets/app.js`:
    streams keep going.
 4. Each column's footer reads the `X-NYU-*` response headers: tokens the gateway
    counted, elapsed time, and a `mock` badge when the Archway had no active credential
-   for that vendor and answered from its mock adapter â€” with real token accounting.
+   for that vendor and answered from its mock adapter — with real token accounting.
 5. A single `AbortController` per column makes "Stop all" one loop over four signals.
 
 When everything settles, a summary line names the fastest model and the one that spent
@@ -61,7 +61,7 @@ the fewest tokens. Tokens, not dollars, are what the Archway enforces.
 | --- | --- |
 | `index.html` | Page shell, the prompt form, the model picker, and this app's few layout rules |
 | `assets/app.js` | The fan-out: picker state, concurrent streams, per-column rendering |
-| `assets/archway.js` | Shared Archway client â€” key panel, models, chat, streaming, errors |
+| `assets/archway.js` | Shared Archway client — key panel, models, chat, streaming, errors |
 | `assets/archway.css` | Shared design system: tokens, components, dark mode |
 
 The two shared `assets/archway.*` files are identical across every Archway example, so

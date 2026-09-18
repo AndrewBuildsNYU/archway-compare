@@ -21,8 +21,8 @@
   // number is quoted in index.html's card note - change both together.
   var MAX_TOKENS = 400;
 
-  var DASH = "—";
-  var ELLIPSIS = "…";
+  var DASH = "\u2014";
+  var ELLIPSIS = "\u2026";
 
   var PICK_HINT =
     "One key reaches every vendor the Archway fronts. Pick up to four " +
