@@ -19,7 +19,13 @@
 
   // Short answers keep the columns comparable and the quota cost small. The
   // number is quoted in index.html's card note - change both together.
-  var MAX_TOKENS = 400;
+  //
+  // 400 was too tight to be fair to a thinking model: on Gemini the cap covers
+  // thinking as well as the visible answer, so those columns came back
+  // truncated while the others were complete - reading as a worse model rather
+  // than a smaller budget. The gateway now pins a modest reasoning effort for
+  // that vendor and this leaves room for it.
+  var MAX_TOKENS = 900;
 
   var DASH = "\u2014";
   var ELLIPSIS = "\u2026";
