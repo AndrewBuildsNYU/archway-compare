@@ -63,6 +63,7 @@ the fewest tokens. Tokens, not dollars, are what the Archway enforces.
 | `assets/app.js` | The fan-out: picker state, concurrent streams, per-column rendering |
 | `assets/archway.js` | Shared Archway client — key panel, models, chat, streaming, errors |
 | `assets/archway.css` | Shared design system: tokens, components, dark mode |
+| `assets/fonts/` | Inter, the interface typeface, self-hosted under the SIL Open Font License (`OFL.txt`) |
 
 The two shared `assets/archway.*` files are identical across every Archway example, so
 a fix made in one place lands in all of them.
